@@ -1,3 +1,13 @@
+## Version Header
+
+Title: Runbook: Resolve Single-User AD Login Lockout from Stale Credentials  
+Version: 1.0  
+Date: 07/08/2026  
+Author: Vicky_ BePostive  
+Reviewed: self  
+Status: draft  
+Change: initial version from RCA
+
 # Runbook: Resolve Single-User AD Login Lockout from Stale Credentials
 
 Date: 2026-08-06  

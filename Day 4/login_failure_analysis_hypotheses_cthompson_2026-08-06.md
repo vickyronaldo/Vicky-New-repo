@@ -1,154 +1,161 @@
-# Login Failure Analysis and Hypotheses
+# Runbook: Resolve Single-User AD Login Lockout from Stale Credentials
 
 Date: 2026-08-06  
-User: cthompson  
-Symptom: User cannot log in  
-Scope facts used only:
-- Impact: cthompson only (single user)
-- Since: ~08:40 this morning
-- Known change: Nil
+Incident reference: FINBRIDGE\\cthompson login failure  
+Confirmed pattern: Wrong-password attempts (Events 4776/4771) followed by lockout (Event 4740)
 
-## Ranked Most Likely Causes (Most Probable First)
+## 1. Prerequisites
 
-1. Account lockout or bad password state
-Why this fits scope facts:
-- Single-user impact points to a user-specific identity issue.
-- Sudden onset around a specific time is consistent with lockout after repeated failures.
-Fastest single check:
-- Check cthompson account status in AD/Entra sign-in logs for lockout/disabled state and latest failure reason.
+Before starting, confirm all items below are available.
 
-2. Incorrect credentials entered (or stale saved credentials)
-Why this fits scope facts:
-- Only one affected user is typical for credential mismatch.
-- No broader service issue indicated by scope.
-Fastest single check:
-- Perform one controlled sign-in using known-good credentials (or password reset flow) from a private browser session.
+1. Access to Active Directory Users and Computers (ADUC) for FINBRIDGE domain administration.  
+Expected result: You can open the cthompson user object in ADUC.  
+Permission: [Elevated permissions required]
 
-3. Conditional Access or MFA failure for this user
-Why this fits scope facts:
-- CA/MFA issues can target a single user while others are unaffected.
-- Can start at token expiry or auth challenge time without a reported change.
-Fastest single check:
-- Review cthompson’s most recent Entra sign-in event for CA/MFA failure code (deny, timeout, non-compliance requirement).
+2. Access to a domain controller Security Event Log (or SIEM view of DC security events).  
+Expected result: You can query Events 4625, 4740, 4771, and 4776 for FINBRIDGE\\cthompson.  
+Permission: [Elevated permissions required]
 
-4. Account state restriction (disabled, expired, blocked sign-in)
-Why this fits scope facts:
-- User-object restrictions are inherently single-user impact.
-- Time-based expiry/restriction can appear suddenly in the morning with no ticketed change.
-Fastest single check:
-- Verify enabled/disabled status, account expiry, and sign-in block flags for cthompson.
+3. Access to DHCP/NAC/asset inventory for IP-to-device lookup.  
+Expected result: You can resolve source IP 10.10.8.112 to an owned asset.  
+Permission: [Elevated permissions required]
 
-5. Endpoint/session-specific issue on the user device
-Why this fits scope facts:
-- If identity status is healthy, single-user symptom often narrows to device/session condition.
-- Local cache/token/profile/network path issue can appear abruptly at a specific time.
-Fastest single check:
-- Attempt login from a known-good alternate device/network; success there isolates the issue to the original endpoint.
+4. Access to endpoint administration tools for DESKTOP-FB022 and the secondary source asset.  
+Expected result: You can sign in locally or remotely to both endpoints with admin rights.  
+Permission: [Elevated permissions required]
 
-## Working Position
-- No single root cause is confirmed yet.
-- This is a ranked hypothesis list for rapid elimination, not a final diagnosis.
+5. Approved temporary password handoff method (for example, service desk verified phone process).  
+Expected result: You have a secure channel ready to deliver temporary credentials to the user.
 
-## Event Evidence Added (Incident Window)
+6. User availability for one controlled sign-in test.  
+Expected result: User cthompson confirms they can perform a test sign-in during the change window.
 
-Source: Security Event Log on DESKTOP-FB022  
-Window: 2024-03-15 08:44-09:12
+## 2. Procedure
 
-Key events:
-- 08:44:01 - Event 4776 Audit Failure, FINBRIDGE\cthompson, error 0xC000006A (wrong password), source workstation DESKTOP-FB022.
-- 08:44:03 - Event 4625 Audit Failure, FINBRIDGE\cthompson, unknown user name or bad password, logon type 2, source DESKTOP-FB022.
-- 08:44:28 - Event 4625 Audit Failure, FINBRIDGE\cthompson, unknown user name or bad password, logon type 2, source DESKTOP-FB022.
-- 08:44:55 - Event 4625 Audit Failure, FINBRIDGE\cthompson, unknown user name or bad password, logon type 2, source DESKTOP-FB022.
-- 08:44:56 - Event 4740 Audit Failure, user account locked out, FINBRIDGE\cthompson, caller computer DESKTOP-FB022.
-- 08:45:10 - Event 4625 Audit Failure, FINBRIDGE\cthompson, account locked out, logon type 7 (unlock attempt), source DESKTOP-FB022.
-- 08:45:44 - Event 4771 Audit Failure, Kerberos pre-auth failed, FINBRIDGE\cthompson, failure code 0x18 (wrong password), source IP 10.10.8.112.
-- 08:46:01 - Event 4771 Audit Failure, Kerberos pre-auth failed, FINBRIDGE\cthompson, failure code 0x18 (wrong password), source IP 10.10.8.112.
-- 08:46:33 - Event 4771 Audit Failure, Kerberos pre-auth failed, FINBRIDGE\cthompson, failure code 0x18 (wrong password), source IP 10.10.8.112.
+Perform each step in order.
 
-## Evidence Assessment Against Each Hypothesis
+1. Query the DC Security log for FINBRIDGE\\cthompson covering the last 60 minutes.  
+Expected result: You capture a timeline including failure and lockout events.
 
-1. Account lockout or bad password state  
-Judgement: Supports  
-Determining events:
-- Event 4776 at 08:44:01 (wrong password 0xC000006A).
-- Event 4625 at 08:44:03, 08:44:28, 08:44:55 (bad password failures).
-- Event 4740 at 08:44:56 (account locked out).
-- Event 4625 at 08:45:10 (account locked out).
+2. Confirm presence of Event 4740 for FINBRIDGE\\cthompson.  
+Expected result: Lockout state is verified from event evidence.
 
-2. Incorrect credentials entered (or stale saved credentials)  
-Judgement: Supports  
-Determining events:
-- Event 4776 at 08:44:01 (wrong password 0xC000006A).
-- Event 4625 at 08:44:03, 08:44:28, 08:44:55 (bad password failures).
-- Event 4771 at 08:45:44, 08:46:01, 08:46:33 (wrong password 0x18) from 10.10.8.112, indicating repeated wrong-credential attempts from another source.
+3. Confirm presence of Event 4776 with error 0xC000006A or Event 4771 with failure code 0x18.  
+Expected result: Wrong-password mechanism is verified.
 
-3. Conditional Access or MFA failure for this user  
-Judgement: Contradicts  
-Determining events:
-- Event 4776 at 08:44:01 and Event 4771 at 08:45:44/08:46:01/08:46:33 show wrong-password failures.
-- Event 4740 at 08:44:56 and Event 4625 at 08:45:10 show lockout outcome.
-- No event evidence in this set indicates CA deny or MFA challenge failure as the trigger.
+4. Identify all unique source hosts/IPs from the failure events.  
+Expected result: You have a list that includes DESKTOP-FB022 and any additional source such as 10.10.8.112.
 
-4. Account state restriction (disabled, expired, blocked sign-in)  
-Judgement: Neutral  
-Determining events:
-- Event 4740 at 08:44:56 confirms lockout state did occur.
-- Earlier Event 4776 at 08:44:01 and Event 4625 at 08:44:03/08:44:28/08:44:55 show wrong password first.
-- This supports lockout as a resulting state, but does not prove disabled/expired/admin block as initial cause.
+5. Resolve each source IP to an asset owner record using DHCP/NAC/inventory.  
+Expected result: Each source in the list is mapped to a device record.  
+Permission: [Elevated permissions required]
 
-5. Endpoint/session-specific issue on the user device  
-Judgement: Neutral  
-Determining events:
-- Event 4625 at 08:44:03, 08:44:28, 08:44:55 from DESKTOP-FB022 supports local endpoint involvement.
-- Event 4771 at 08:45:44, 08:46:01, 08:46:33 from 10.10.8.112 indicates an additional source, so not endpoint-only.
+6. Reset FINBRIDGE\\cthompson password to a temporary strong value in ADUC.  
+Expected result: Password reset completes successfully.  
+Permission: [Elevated permissions required]
 
-## Surviving Hypothesis
+7. Unlock FINBRIDGE\\cthompson account in ADUC.  
+Expected result: Account status changes to unlocked.  
+Permission: [Elevated permissions required]
 
-Incorrect credentials or stale saved credentials (from one or more devices/sessions) caused repeated bad-password attempts, which then triggered account lockout.
+8. Set "User must change password at next logon" on FINBRIDGE\\cthompson.  
+Expected result: Flag is enabled on the user object.  
+Permission: [Elevated permissions required]
 
-Evidence basis:
-- Wrong-password failures are explicit (4776 at 08:44:01; 4771 at 08:45:44/08:46:01/08:46:33).
-- Lockout is explicit (4740 at 08:44:56).
-- Continued attempts after lockout indicate a likely cached or automated credential source.
+9. Revoke active cloud sessions for cthompson in Entra/M365 admin portal.  
+Expected result: Existing tokens/sessions are invalidated.  
+Permission: [Elevated permissions required]
 
-## Detailed Resolution Steps
+10. Remove stored FINBRIDGE credentials from Windows Credential Manager on DESKTOP-FB022.  
+Expected result: Stale credential entries for user resources are deleted.  
+Permission: [Elevated permissions required]
 
-1. Restore access safely
-- Reset cthompson password to a temporary strong password.
-- Unlock the account in AD.
-- Require password change at next sign-in.
-- Perform one controlled sign-in on the primary workstation.
+11. Sign out all Microsoft 365 desktop apps on DESKTOP-FB022.  
+Expected result: App sessions are disconnected.
 
-2. Stop active bad-auth sources
-- Pause use of non-primary devices or disconnect them temporarily.
-- Revoke active user sessions where applicable.
-- Confirm no new 4625/4771/4776 events for several minutes before next test.
+12. Sign in to Microsoft 365 desktop apps on DESKTOP-FB022 using the temporary password.  
+Expected result: Apps authenticate successfully with current credentials.
 
-3. Identify and remediate secondary source (10.10.8.112)
-- Map IP 10.10.8.112 to an asset via DHCP/inventory/NAC.
-- Remove or update stale credentials on that asset:
-	- Credential Manager entries
-	- Outlook/Teams/OneDrive saved auth
-	- Mapped drives using old credentials
-	- Scheduled tasks running as cthompson
-	- Services configured with cthompson account
+13. Remove stored FINBRIDGE credentials from Windows Credential Manager on the secondary source asset (mapped from 10.10.8.112).  
+Expected result: Stale credential entries are deleted on the secondary source.  
+Permission: [Elevated permissions required]
 
-4. Clean primary endpoint (DESKTOP-FB022)
-- Remove stale credentials from Credential Manager.
-- Sign out and sign back in to Office/M365 apps.
-- Reconnect mapped resources with the current password.
-- Reboot once to clear auth cache.
+14. Update any scheduled task on the secondary source that runs as cthompson with the temporary password.  
+Expected result: Task credentials save successfully and task status remains ready.  
+Permission: [Elevated permissions required]
 
-5. Validate and close
-- Confirm successful user sign-in.
-- Monitor 15-30 minutes for absence of:
-	- Event 4771 (0x18)
-	- Event 4776 wrong-password
-	- Event 4625 for cthompson
-	- Event 4740 relockout
-- If clean, record root cause as stale/incorrect credentials from secondary source causing lockout.
+15. Update any Windows service on the secondary source that runs as cthompson with the temporary password.  
+Expected result: Service logon credentials update without validation error.  
+Permission: [Elevated permissions required]
 
-6. Prevent recurrence
-- Document offending device/app and remediation performed.
-- Advise user to update credentials on all devices/apps immediately after password changes.
-- Review lockout policy threshold/window if recurrence is frequent.
+16. Reconnect mapped drives on DESKTOP-FB022 using the temporary password when prompted.  
+Expected result: Mapped resources reconnect without access denied.
+
+17. Ask cthompson to perform one interactive sign-in to DESKTOP-FB022.  
+Expected result: User signs in successfully and reaches desktop.
+
+18. Require cthompson to change the temporary password immediately at first sign-in prompt.  
+Expected result: Password change completes and session remains active.
+
+19. Re-run DC Security log query for FINBRIDGE\\cthompson after sign-in.  
+Expected result: No new lockout event (4740) appears.
+
+20. Monitor for 15 minutes for new Events 4625, 4771 (0x18), or 4776 (0xC000006A) for FINBRIDGE\\cthompson.  
+Expected result: No new wrong-password failures are recorded.
+
+## 3. Verification
+
+Confirm all verification checks before closure.
+
+1. Validate cthompson can sign out and sign back in again on DESKTOP-FB022.  
+Expected result: Second sign-in succeeds.
+
+2. Validate business-critical resources (mailbox, Teams, OneDrive, mapped drives) open successfully for cthompson.  
+Expected result: All listed resources authenticate without credential prompts.
+
+3. Validate no new Event 4740 for FINBRIDGE\\cthompson in the previous 15 minutes.  
+Expected result: No relockout event is present.
+
+4. Validate no new Event 4771 (0x18) or 4776 (0xC000006A) for FINBRIDGE\\cthompson in the previous 15 minutes.  
+Expected result: No continuing stale-credential source is present.
+
+5. Record closure note with exact verification timestamps and checked event IDs.  
+Expected result: Ticket contains auditable proof of recovery.
+
+## 4. Rollback
+
+Use this section immediately if the procedure worsens the incident (for example, repeated relockout, broad auth disruption, or user unable to access critical services).
+
+1. Stop further user sign-in attempts for cthompson on all devices.  
+Expected result: New bad-password attempts cease.
+
+2. Disable network connectivity on the identified offending secondary source asset (for example, disconnect NIC or block switch port).  
+Expected result: Bad-auth traffic from that source stops.  
+Permission: [Elevated permissions required]
+
+3. Reset FINBRIDGE\\cthompson password to a new temporary value in ADUC.  
+Expected result: Previous temporary credential is invalidated.  
+Permission: [Elevated permissions required]
+
+4. Unlock FINBRIDGE\\cthompson account in ADUC again.  
+Expected result: Account returns to unlocked state.  
+Permission: [Elevated permissions required]
+
+5. Force sign-out/revoke sessions again in Entra/M365 for cthompson.  
+Expected result: Old tokens are removed to prevent replay attempts.  
+Permission: [Elevated permissions required]
+
+6. Perform one sign-in test only on DESKTOP-FB022 after confirming no fresh 4625/4771/4776 events for 5 minutes.  
+Expected result: Controlled login either succeeds cleanly or reproduces issue in isolation.
+
+7. Escalate to Identity/AD on-call with event exports if controlled login still fails.  
+Expected result: Incident ownership transfers with complete technical evidence.
+
+## 5. Notes
+
+- Edge case: If failure events continue from an unknown IP, treat as an unmanaged device or stale mobile client and block source at network edge pending identification.
+- Edge case: If cthompson is used as a service account anywhere, coordinate with application owner before password reset to avoid wider service interruption.
+- Warning: Do not perform repeated unlock attempts before removing stale credential sources; this will immediately relock the account.
+- Warning: Keep temporary passwords short-lived and force user password change at first successful interactive sign-in.
+- Related event pattern for this incident: 4776/4625 sequence, then 4740 lockout, followed by 4771 from secondary source (10.10.8.112).
+- Related incidents: [RCA_login_failure_cthompson_2026-08-06.md](Day%204/RCA_login_failure_cthompson_2026-08-06.md), [known_error_record_login_failure_cthompson_2026-08-06.md](Day%204/known_error_record_login_failure_cthompson_2026-08-06.md), [closure_note_login_failure_cthompson_2026-08-06.md](Day%204/closure_note_login_failure_cthompson_2026-08-06.md).
