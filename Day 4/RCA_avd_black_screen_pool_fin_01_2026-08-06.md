@@ -1,133 +1,118 @@
-# Root Cause Analysis (RCA): AVD Black Screen After Login - POOL-FIN-01
+# Runbook: Finance Team Cannot Access Shared Drives (POOL-FIN-01)
 
-## Incident Summary
-- Incident: Intermittent and persistent black screen after AVD login.
-- Affected pool: POOL-FIN-01 (Finance desktop pool).
-- Unaffected pool: POOL-FIN-02.
-- First reported: Approximately 07:00.
-- Scope: Approximately 40% of POOL-FIN-01 users affected.
-- Change correlation: Overnight image update applied to POOL-FIN-01 at 02:00; POOL-FIN-02 was not updated.
-- Service restoration: Resolution applied; issue confirmed resolved at 10:00.
-- Post-fix verification: Users are logging in to POOL-FIN-01 hosts with no issues reported.
+## 1. Prerequisites
+Collect the following before starting:
 
-## Business Impact
-- Users in Finance experienced delayed or failed desktop readiness post-login.
-- Some sessions recovered after around 30 seconds; others required repeated reconnect/support assistance.
-- Work disruption occurred during business-start login period.
+1. Incident ticket ID and impacted user UPNs.
+2. Share path that fails (example: \\fileserver\finance).
+3. Exact user error message and error code.
+4. Impact scope count (single user, multiple users, or whole Finance team).
+5. User connection system (AVD Remote Desktop client, Windows App, or web client).
+6. Affected host pool name (expected: POOL-FIN-01).
+7. At least one affected session host name (example: SHFIN-01-A).
+8. Confirmation whether POOL-FIN-01 image changed in last 24 hours.
+9. Access to Azure portal with AVD rights.
+10. Access to session host event logs.
 
-## Supporting Evidence
+Required permissions:
+- [Elevated Permissions Required] Azure Virtual Desktop Contributor (or equivalent) on the affected host pool.
+- [Elevated Permissions Required] Local Administrator on affected session hosts to review Application and Desktop Window Manager logs.
 
-### Affected host evidence (SHFIN-01-A, POOL-FIN-01)
-- 07:02:10 - Event 21 (TerminalServices-LocalSessionManager): Session logon succeeded for FINBRIDGE\\mlopez.
-- 07:02:14 - Event 1 (Kernel-General): Host boot time 02:03:11, consistent with overnight update/restart.
-- 07:02:16 - Event 1000 (Application Error): dwm.exe faulting module igdumd64.dll, exception 0xc0000005.
-- 07:02:17 - Event 40 (TerminalServices-LocalSessionManager): Session disconnected.
-- 07:02:18 - Event 9009 (Desktop Window Manager): DWM exited with error.
-- 07:02:44 - Event 21: Session logon succeeded (reconnect).
-- 07:02:46 - Event 1000: Repeated dwm.exe + igdumd64.dll crash.
-- 07:02:47 - Event 40: Session disconnected.
-- 07:03:01 - Event 9009: DWM exited with error.
-- 07:03:10 - Event 21: Session logon succeeded (second reconnect).
-- 07:08:24 - Event 1000: Same dwm.exe + igdumd64.dll crash pattern for another user session.
+## 2. Procedure
 
-### Control evidence (SHFIN-02-A, POOL-FIN-02 unaffected)
-- 07:01:44 - Event 21: Session logon succeeded.
-- 07:01:46 - Event 9011 (Desktop Window Manager): DWM started successfully.
-- No Event 1000 Application Error entries in the same period.
+1. Confirm the affected users are connected to POOL-FIN-01.
+Expected result: All sampled failing users are mapped to POOL-FIN-01 sessions.
 
-## Timeline (UTC/local operational timeline as recorded)
-1. 02:00 - New image rollout applied to POOL-FIN-01.
-2. 02:03 - Affected host reboot recorded (Event 1 boot time 02:03:11).
-3. Approximately 07:00 - First user reports black screen post-login.
-4. 07:02 to 07:08 - Repeated user logon success followed by DWM crash and session disconnect pattern on SHFIN-01-A.
-5. During triage window - Comparative check confirms POOL-FIN-02 healthy with successful DWM starts and no matching crash signature.
-6. Resolution window - Mitigation and image corrective actions applied to POOL-FIN-01 path.
-7. 10:00 - Incident marked resolved; verified user logins to POOL-FIN-01 successful with no ongoing reports.
+2. Reproduce the issue by signing in as one affected user and opening the reported share path.
+Expected result: The user gets the same shared-drive access failure.
 
-## Hypothesis Elimination Summary
+3. Open Event Viewer on one affected host and filter Application log for Event ID 1000 in the failure window.
+Expected result: Repeated dwm.exe crash entries with faulting module igdumd64.dll are visible.
 
-1. Image-level graphics/display regression introduced by update
-- Status: Supported.
-- Evidence: Event 1000 (dwm.exe faulting igdumd64.dll) and Event 9009 repeated in affected pool only; unaffected control pool clean.
+4. Open Event Viewer on the same host and filter Desktop Window Manager log for Event ID 9009 in the same window.
+Expected result: Repeated DWM exit events align with user login or reconnect attempts.
 
-2. Logon startup chain regression (shell/GPO/script/app init)
-- Status: Weaker/contradicted.
-- Evidence: Session logon succeeded (Event 21) before immediate graphics stack crash sequence.
+5. Compare one host in POOL-FIN-02 for Event ID 1000 and Event ID 9009 in the same period.
+Expected result: POOL-FIN-02 does not show the same repeated crash signature.
 
-3. FSLogix/profile attach delay or failure
-- Status: Weaker/contradicted.
-- Evidence: Specific repeated DWM graphics fault signature dominates event chain.
+6. Pause further image rollout to POOL-FIN-01.
+Expected result: No additional hosts in POOL-FIN-01 receive the suspect image.
+[Elevated Permissions Required]
 
-4. AVD agent/component mismatch
-- Status: Neutral from provided logs.
-- Evidence: No direct agent-version failure event in supplied evidence.
+7. Set new sessions to drain mode on affected POOL-FIN-01 hosts.
+Expected result: New user sessions stop landing on unstable hosts.
+[Elevated Permissions Required]
 
-5. Host performance saturation
-- Status: Weaker/contradicted.
-- Evidence: Crash signature is deterministic application/module fault, not generic load-pressure pattern.
+8. Reassign affected hosts to the last known-good image baseline.
+Expected result: Reassigned hosts are queued for redeploy with baseline image.
+[Elevated Permissions Required]
 
-## Root Cause
-Primary root cause was an image-coupled graphics/display regression in POOL-FIN-01 introduced by the overnight update, causing Desktop Window Manager (dwm.exe) to crash in igdumd64.dll during session initialization and resulting in black screen/disconnect behavior.
+9. Redeploy one pilot host from POOL-FIN-01 using the known-good baseline.
+Expected result: Pilot host comes online and reports healthy in AVD.
+[Elevated Permissions Required]
 
-## Why This Root Cause Is High Confidence
-- Strong temporal alignment: issue starts after 02:00 update and appears during first heavy login wave.
-- Strong scope isolation: only updated pool impacted; non-updated pool unaffected.
-- Strong technical signature: repeated, cross-user, same process/module/exception pattern in affected pool.
-- Resolution confirmation: after corrective action, logins normalized and no new user-reported symptom at 10:00 verification.
+10. Run a test login to the pilot host and open the affected share path.
+Expected result: Desktop loads normally and shared drive opens successfully.
 
-## 5 Whys Analysis
+11. Redeploy remaining affected POOL-FIN-01 hosts in controlled waves.
+Expected result: Host fleet returns to healthy state without reintroducing black-screen behavior.
+[Elevated Permissions Required]
 
-### Problem statement
-Finance users in POOL-FIN-01 saw black screens after login; some sessions disconnected and required retries/support.
+12. Remove drain mode after each host wave passes login and shared-drive access checks.
+Expected result: Users can reconnect to remediated hosts with normal behavior.
+[Elevated Permissions Required]
 
-1. Why did users see a black screen after login?
-Because the desktop compositor process (dwm.exe) crashed during session initialization.
+13. Notify Service Desk that Finance user retest can begin.
+Expected result: Service Desk starts user validation calls with restored access.
 
-2. Why did dwm.exe crash?
-Because the graphics/display module path (igdumd64.dll) faulted repeatedly with access violation (Event 1000, 0xc0000005).
+## 3. Verification
 
-3. Why was this crash pattern present only in Finance pool sessions?
-Because POOL-FIN-01 received an overnight image update that POOL-FIN-02 did not receive.
+1. Verify three representative Finance users can sign in to POOL-FIN-01 and open the shared-drive path.
+Pass criteria: All three users open the target share path without error.
 
-4. Why did the image update introduce a pool-impacting regression?
-Because the promoted image contained an unstable graphics driver/component combination for this AVD workload.
+2. Verify no new Event ID 1000 entries for dwm.exe with igdumd64.dll on remediated hosts during a 30-minute login window.
+Pass criteria: Zero recurring crash-signature events.
 
-5. Why was this not caught before broad pool exposure?
-Because pre-production canary validation and comparison-pool gating were insufficient to detect DWM/driver crash behavior under realistic login conditions.
+3. Verify no repeated Event ID 9009 bursts on remediated hosts during the same window.
+Pass criteria: No recurring DWM-exit pattern linked to login attempts.
 
-## Resolution Implemented
-1. Stopped further exposure by pausing continuation of the affected image path for POOL-FIN-01.
-2. Validated behavior against known-good baseline image path.
-3. Rolled affected host path back/redeployed to stable baseline in controlled waves.
-4. Corrected image content to remove/replace unstable graphics component lineage.
-5. Reintroduced changes through controlled pilot before wider availability.
+4. Verify Service Desk has no new Finance tickets with the same symptom for 60 minutes after reopening host capacity.
+Pass criteria: Zero new matching incidents.
 
-## Verification of Fix
-- Time of service confirmation: 10:00.
-- Operational verification: Users successfully logging into POOL-FIN-01 hosts.
-- User experience verification: No active black-screen complaints reported post-fix.
-- Technical verification target: No recurring Event 1000 dwm.exe/igdumd64.dll and no repeated Event 9009 pattern during post-fix login window.
+## 4. Rollback
 
-## Corrective and Preventive Actions (CAPA)
+Use this rollback only if shared-drive failures continue or black-screen symptoms increase after redeployment.
 
-### Corrective actions completed
-- Isolated and remediated affected host image path.
-- Restored stable login behavior for POOL-FIN-01.
-- Confirmed user access restoration.
+1. Set all recently changed POOL-FIN-01 hosts back to drain mode immediately.
+Expected result: New user exposure to unstable hosts stops.
+[Elevated Permissions Required]
 
-### Preventive actions
-1. Introduce mandatory canary ring for all pool image updates with production-like login soak tests.
-2. Add release gate checks for Event 1000 (dwm.exe), Event 9009, and abnormal disconnect deltas before broad rollout.
-3. Enforce control-pool comparison signoff: updated pool must remain within baseline deviation against a non-updated pool.
-4. Pin and validate graphics driver stack versions for AVD multi-session images; block unvalidated driver drift.
-5. Expand monitoring alerts for early login-window crash signatures after image deployment.
-6. Update rollback runbook with explicit trigger thresholds and target completion time.
+2. Repoint POOL-FIN-01 deployment target to the previous stable image version used before the 02:00 rollout.
+Expected result: Future redeploy actions use the known-stable image only.
+[Elevated Permissions Required]
 
-## Residual Risk and Follow-up
-- Residual risk: Medium-low after rollback/fix, pending observation through additional peak login periods.
-- Follow-up: Monitor next business-day login window and review event telemetry for recurrence before closing problem record.
+3. Redeploy the pilot host again from the previous stable image version.
+Expected result: Pilot host returns online on confirmed stable image lineage.
+[Elevated Permissions Required]
 
-## Final Status
-- Incident state: Resolved.
-- Resolution timestamp: 10:00.
-- User impact status: Cleared for POOL-FIN-01 based on verification and no ongoing reports.
+4. Run pilot validation by logging in and opening the same share path used in reproduction.
+Expected result: User desktop and shared-drive access both succeed.
+
+5. Redeploy remaining changed hosts back to the previous stable image in waves of five hosts.
+Expected result: Service is restored progressively while limiting blast radius.
+[Elevated Permissions Required]
+
+6. Route priority Finance users to POOL-FIN-02 until POOL-FIN-01 is stable.
+Expected result: Business-critical users regain access while recovery continues.
+[Elevated Permissions Required]
+
+7. Raise a Problem record tagged Image Regression and attach Event 1000 and Event 9009 evidence from the failed change.
+Expected result: Engineering owns the permanent fix and release-gate update.
+
+## 5. Notes
+
+- Edge case: If only one user fails and no DWM crash signature exists, treat as user profile or share permission issue instead of pool image regression.
+- Edge case: If shared-drive access fails with credential prompts but no black screen, check stale cached credentials and drive mapping policy.
+- Warning: Do not remove drain mode from a host wave until event log checks pass for that wave.
+- Warning: Do not deploy unvalidated graphics driver updates directly to POOL-FIN-01.
+- Related incidents: triage_summary_avd_black_screen_pool_fin_01.md, known_error_record_avd_black_screen_pool_fin_01_2026-08-06.md, closure_note_avd_black_screen_pool_fin_01_2026-08-06.md.
