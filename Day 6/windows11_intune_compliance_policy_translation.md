@@ -31,19 +31,125 @@ Flag: UI path can vary by tenant flighting, role, and portal updates.
 
 ## Baseline-to-Policy mapping
 
-| Requirement | Setting name (exact Intune label) | Value | Effect (plain English) | False-positive risk | Recommendation to reduce false positives without weakening security |
-|---|---|---|---|---|---|
-| 1. BitLocker must be enabled on the OS drive | Require BitLocker | Require | Device is noncompliant unless BitLocker is enabled and reported through Windows Health Attestation. | Status can lag until reboot after encryption finishes; DHA/TPM attestation delays; unsupported/legacy TPM hardware can misreport. | Keep requirement as Require, but include user guidance to reboot after enabling BitLocker and allow 7-day remediation window. For diagnostics, pair with reporting from encryption posture in Endpoint Security. |
-| 2. Secure Boot must be enabled | Require Secure Boot to be enabled on the device | Require | Device is noncompliant if Secure Boot is off or not attested. | Older hardware/firmware, certain TPM 1.2/unsupported states, or attestation issues may show noncompliant even when endpoint is otherwise healthy. | Keep Require. Pre-validate hardware readiness in procurement standards and maintain exclusion groups only for approved legacy exceptions with compensating controls and retirement date. |
-| 3. Minimum OS build N-1 (10.0.22621.2861) | Minimum OS version | 10.0.22621.2861 | Blocks devices running lower builds from being compliant. | Devices on supported but newer feature branches can still pass Minimum OS, but temporarily stale inventory/check-in can delay state update; typo in version format can incorrectly fail all devices. | Use exact 4-part version format and peer review the entered value. Consider using Valid operating system builds for ring-based precision while keeping N-1 floor policy intent. |
-| 4. Microsoft Defender real-time protection must be on | Real-time protection | Require | Device is noncompliant when real-time malware scanning is disabled. | Third-party AV coexistence or passive mode transitions can briefly report unhealthy; service startup race after reboot may momentarily fail. | Keep Require. Standardize AV stack (single primary endpoint protection model) and monitor transient states before escalating; 7-day grace absorbs short-lived startup/reporting drift. |
-| 5. Firewall must be enabled for all profiles | Firewall | Require | Requires Windows Firewall enabled and prevents user disabling through compliance enforcement logic. | Conflicting GPO/device config can override and cause noncompliance despite intended secure config; immediate post-boot sync can return temporary Error state. | Keep Require. Remove conflicting legacy GPOs and manage firewall posture from Intune policy consistently; if error appears right after boot, force re-sync before incident assignment. |
-| 6. A PIN or password must be configured | Require a password to unlock mobile devices | Require | User must have a device unlock credential configured to remain compliant. | Label references "mobile devices" but applies in Windows compliance context; shared/kiosk/special-purpose endpoints might intentionally not have interactive unlock patterns. | Keep Require for user endpoints. Scope kiosk/shared-device profiles separately and apply dedicated compliance policy with explicit business exception approval. |
-| 7. Device must not be jailbroken or rooted | No direct Windows compliance setting (not applicable on Windows compliance profile) | N/A | Intune Windows compliance does not expose a "jailbroken/rooted" toggle like mobile platforms. | Requirement may appear unmet in audit mapping if treated as mandatory direct setting. | Document as platform N/A. Use compensating controls: Require Secure Boot, Require BitLocker, Defender real-time protection, and optionally Defender for Endpoint risk-level compliance rule. |
+### Prerequisite navigation (use once)
+
+1. Open Intune admin center.
+2. Go to Endpoint security > Device compliance > Policies.
+3. Select Create Policy.
+4. Set Platform to Windows 10 and later.
+5. Continue to the Settings page.
+
+### Requirement 1: BitLocker must be enabled on the OS drive
+
+- Settings name: Require BitLocker
+- Value: Require
+- UI path: Compliance settings > Device health > Require BitLocker
+- Effect: Device is noncompliant unless BitLocker is enabled and reported through Windows Health Attestation.
+- False-positive risk: Status can lag until reboot after encryption finishes; DHA/TPM attestation delays; unsupported or legacy TPM hardware can misreport.
+- Recommendation: Keep Require, include user guidance to reboot after enabling BitLocker, and keep the 7-day remediation window.
+
+Steps:
+
+1. In the policy settings, open Device health.
+2. Find Require BitLocker.
+3. Set it to Require.
+4. Save and continue.
+
+### Requirement 2: Secure Boot must be enabled
+
+- Settings name: Require Secure Boot to be enabled on the device
+- Value: Require
+- UI path: Compliance settings > Device health > Require Secure Boot to be enabled on the device
+- Effect: Device is noncompliant if Secure Boot is off or not attested.
+- False-positive risk: Older hardware or firmware, some TPM 1.2/unsupported states, or attestation issues can report noncompliant even when the endpoint is otherwise healthy.
+- Recommendation: Keep Require, pre-validate hardware readiness, and keep tightly governed exception groups for approved legacy devices only.
+
+Steps:
+
+1. In Device health, find Require Secure Boot to be enabled on the device.
+2. Set it to Require.
+3. Save and continue.
+
+### Requirement 3: Minimum OS build N-1 (10.0.22621.2861)
+
+- Settings name: Minimum OS version
+- Value: 10.0.22621.2861
+- UI path: Compliance settings > Device properties > Operating system version > Minimum OS version
+- Effect: Devices running lower builds are marked noncompliant.
+- False-positive risk: Stale check-in data can delay compliant state updates; a formatting mistake can fail many devices.
+- Recommendation: Use exact four-part version format and peer-review the value before assignment. Consider Valid operating system builds for ring-level precision.
+
+Steps:
+
+1. In Device properties, open Operating system version.
+2. Find Minimum OS version.
+3. Enter 10.0.22621.2861.
+4. Save and continue.
+
+### Requirement 4: Windows Defender real-time protection must be on
+
+- Settings name: Real-time protection
+- Value: Require
+- UI path: Compliance settings > System security > Defender > Real-time protection
+- Effect: Device is noncompliant when real-time malware scanning is disabled.
+- False-positive risk: Third-party AV coexistence, passive mode transitions, or service startup timing after reboot can briefly report unhealthy.
+- Recommendation: Keep Require and standardize the endpoint protection model to reduce transient reporting drift.
+
+Steps:
+
+1. In System security > Defender, find Real-time protection.
+2. Set it to Require.
+3. Save and continue.
+
+### Requirement 5: Firewall must be enabled for all profiles
+
+- Settings name: Firewall
+- Value: Require
+- UI path: Compliance settings > System security > Device security > Firewall
+- Effect: Requires Windows Firewall enabled and prevents user-driven disablement from remaining compliant.
+- False-positive risk: Conflicting GPO or other management channels can override firewall posture; immediate post-boot sync can briefly show error.
+- Recommendation: Keep Require, remove conflicting legacy GPOs, and re-sync before triaging as incident.
+
+Steps:
+
+1. In System security > Device security, find Firewall.
+2. Set it to Require.
+3. Save and continue.
+
+### Requirement 6: A PIN or password must be configured
+
+- Settings name: Require a password to unlock mobile devices
+- Value: Require
+- UI path: Compliance settings > System security > Password > Require a password to unlock mobile devices
+- Effect: Users must have a device unlock credential configured to remain compliant.
+- False-positive risk: The label is mobile-oriented, and kiosk or shared endpoints may be intentionally configured differently.
+- Recommendation: Keep Require for user endpoints and place shared or kiosk devices in a separate scoped policy with approved exceptions.
+
+Steps:
+
+1. In System security > Password, find Require a password to unlock mobile devices.
+2. Set it to Require.
+3. Save and continue.
+
+### Requirement 7: Device must not be jailbroken or rooted
+
+- Settings name: No direct Windows compliance setting (not applicable on Windows compliance profile)
+- Value: N/A
+- UI path: Not available in Windows 10 and later compliance profile
+- Effect: Windows compliance policies do not expose a jailbroken or rooted toggle like mobile platforms.
+- False-positive risk: Audits can treat this as missing if platform applicability is not documented.
+- Recommendation: Mark as platform N/A and use compensating controls: Require Secure Boot, Require BitLocker, Real-time protection, and optional Defender for Endpoint risk rule.
+
+Steps:
+
+1. Record this requirement as platform N/A in the standard.
+2. Link compensating controls in the same policy set.
+3. Include rationale in CAB or audit evidence.
 
 ## Grace period configuration (applies to all above settings)
 Configure this in the policy action, not in each individual rule.
 
+- UI path: Actions for noncompliance > Mark device noncompliant > Schedule (days after noncompliance)
 - Section: Actions for noncompliance
 - Action: Mark device noncompliant
 - Schedule (days after noncompliance): 7
